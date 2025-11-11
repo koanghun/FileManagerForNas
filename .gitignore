@@ -25,3 +25,6 @@ frontend/yarn-error.log*
 # Global OS generated files
 .DS_Store
 thumbs.db
+
+# VSCode Workspace file
+AIFileManagement.code-workspace
