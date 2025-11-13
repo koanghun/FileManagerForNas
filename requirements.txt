@@ -16,3 +16,7 @@ uvicorn==0.38.0
 httpx
 chromadb
 sentence-transformers
+aiofiles
+python-multipart
+langchain-text-splitters
+chardet

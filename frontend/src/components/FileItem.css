@@ -1,0 +1,65 @@
+.file-item-container {
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.file-info {
+  flex-grow: 1;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.file-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+
+.index-button {
+  padding: 4px 8px;
+  font-size: 12px;
+  border: 1px solid;
+  border-radius: 4px;
+  background-color: #f0f0f0;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.index-button:hover {
+  background-color: #e0e0e0;
+}
+
+.index-button.index { border-color: #28a745; color: #28a745; }
+.index-button.re-index { border-color: #ffc107; color: #ffc107; }
+.index-button.delete-index { border-color: #dc3545; color: #dc3545; }
+
+.index-button:disabled {
+  border-color: #6c757d;
+  color: #6c757d;
+  cursor: not-allowed;
+  background-color: #f8f9fa;
+}
+
+.status-indicator {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 10px;
+  flex-shrink: 0;
+}
+
+.status-indexed { background-color: #28a745; } /* Green */
+.status-not_indexed { background-color: #dc3545; } /* Red */
+.status-outdated { background-color: #ffc107; } /* Orange */
+.status-indexing { background-color: #17a2b8; } /* Blue */
+.status-failed { background-color: #343a40; } /* Dark Grey */
+
+/* Blinking animation for 'indexing' status */
+@keyframes blink {
+  50% { opacity: 0.5; }
+}
+.status-indexing {
+  animation: blink 1.5s linear infinite;
+}

@@ -2,11 +2,13 @@ import os
 import uuid
 import hashlib
 import datetime
-from fastapi import FastAPI, HTTPException, Depends, Header, Request, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Depends, Header, Request, BackgroundTasks, UploadFile, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional, Dict, List
 from pathlib import Path
+from langchain_text_splitters import RecursiveCharacterTextSplitter # New import
 
 # Provider 관련 모듈 import
 from .providers.base import FileSystemProvider, FileItem
@@ -29,6 +31,9 @@ class IndexFolderRequest(BaseModel):
 
 class FolderStatusRequest(BaseModel):
     folder_paths: List[str]
+
+class DeleteItemRequest(BaseModel): # New Pydantic model for delete
+    path: str
 
 # --- FastAPI 앱 설정 ---
 app = FastAPI()
@@ -80,17 +85,18 @@ async def get_provider_and_id(
     return req.app.state.default_provider, req.app.state.default_provider.provider_id
 
 # --- 텍스트 분할 (Chunking) 헬퍼 ---
-def chunk_text(text: str, chunk_size: int = 500, chunk_overlap: int = 50):
+def chunk_text(text: str, chunk_size: int = 750, chunk_overlap: int = 75):
     """텍스트를 중첩되는 청크로 분할합니다."""
     if not text:
         return []
     
-    chunks = []
-    start = 0
-    while start < len(text):
-        end = start + chunk_size
-        chunks.append(text[start:end])
-        start += chunk_size - chunk_overlap
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        length_function=len,
+        separators=["\n\n", "\n", " ", ""] # Prioritize splitting by paragraphs, then lines, then words, then characters
+    )
+    chunks = text_splitter.split_text(text)
     return chunks
 
 # --- 백그라운드 인덱싱 작업 ---
@@ -117,8 +123,10 @@ async def do_index_folder(provider: FileSystemProvider, provider_id: str, folder
         # 각 파일을 순회하며 청킹 및 인덱싱
         for file_item in files_to_index:
             try:
+                print(f"Attempting to read content for: {file_item.path}") # Added print
                 content = await provider.read_file_content(file_item.path)
                 if not content:
+                    print(f"Warning: read_file_content returned None for {file_item.path}. Skipping indexing.") # Added print
                     continue
 
                 # 텍스트를 청크로 분할
@@ -155,6 +163,57 @@ async def do_index_folder(provider: FileSystemProvider, provider_id: str, folder
 def read_root():
     return {"message": "Welcome to AI File Management Backend!"}
 
+@app.post("/api/upload")
+async def upload_file(
+    file: UploadFile,
+    destination_path: str = Header(..., alias="X-Destination-Path"), # Get destination path from header
+    provider_info: tuple = Depends(get_provider_and_id)
+):
+    provider, _ = provider_info
+    try:
+        success = await provider.upload_file(destination_path, file)
+        if success:
+            return {"message": f"File '{file.filename}' uploaded successfully to '{destination_path}'"}
+        raise HTTPException(status_code=500, detail="File upload failed")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An error occurred during upload: {e}")
+
+@app.get("/api/download")
+async def download_file(
+    path: str,
+    provider_info: tuple = Depends(get_provider_and_id)
+):
+    provider, _ = provider_info
+    try:
+        file_item = await provider.get_metadata(path)
+        if not file_item or file_item.is_directory:
+            raise HTTPException(status_code=404, detail="File not found or is a directory")
+
+        # Use StreamingResponse to stream the file content
+        return StreamingResponse(
+            provider.download_file(path),
+            media_type="application/octet-stream", # Generic binary file type
+            headers={"Content-Disposition": f"attachment; filename={file_item.name}"}
+        )
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="File not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An error occurred during download: {e}")
+
+@app.delete("/api/file")
+async def delete_file_or_folder(
+    req: DeleteItemRequest,
+    provider_info: tuple = Depends(get_provider_and_id)
+):
+    provider, _ = provider_info
+    try:
+        success = await provider.delete_item(req.path)
+        if success:
+            return {"message": f"Item '{req.path}' deleted successfully"}
+        raise HTTPException(status_code=500, detail="Failed to delete item")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An error occurred during deletion: {e}")
+
 @app.post("/api/login")
 async def login(login_data: LoginRequest, request: Request):
     try:
@@ -190,7 +249,7 @@ async def list_files(path: str = ".", provider_info: tuple = Depends(get_provide
         raise HTTPException(status_code=500, detail=f"An internal server error occurred: {e}")
 
 @app.get("/api/search")
-async def search_files(query: str, req: Request, n_results: int = 5):
+async def search_files(query: str, req: Request, n_results: int = 10):
     if not query:
         raise HTTPException(status_code=400, detail="Search query cannot be empty")
     results = await req.app.state.search_service.search(query, n_results)
@@ -259,6 +318,57 @@ async def delete_folder_index(req: IndexFolderRequest, provider_info: tuple = De
     deleted_count = await app.state.search_service.delete_files_in_folder(req.folder_path)
 
     return {"message": f"Index for '{req.folder_path}' and {deleted_count} related files have been deleted."}
+
+@app.post("/api/upload")
+async def upload_file(
+    file: UploadFile,
+    destination_path: str = Header(..., alias="X-Destination-Path"), # Get destination path from header
+    provider_info: tuple = Depends(get_provider_and_id)
+):
+    provider, _ = provider_info
+    try:
+        success = await provider.upload_file(destination_path, file)
+        if success:
+            return {"message": f"File '{file.filename}' uploaded successfully to '{destination_path}'"}
+        raise HTTPException(status_code=500, detail="File upload failed")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An error occurred during upload: {e}")
+
+@app.get("/api/download")
+async def download_file(
+    path: str,
+    provider_info: tuple = Depends(get_provider_and_id)
+):
+    provider, _ = provider_info
+    try:
+        file_item = await provider.get_metadata(path)
+        if not file_item or file_item.is_directory:
+            raise HTTPException(status_code=404, detail="File not found or is a directory")
+
+        # Use StreamingResponse to stream the file content
+        return StreamingResponse(
+            provider.download_file(path),
+            media_type="application/octet-stream", # Generic binary file type
+            headers={"Content-Disposition": f"attachment; filename={file_item.name}"}
+        )
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="File not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An error occurred during download: {e}")
+
+@app.delete("/api/file")
+async def delete_file_or_folder(
+    req: DeleteItemRequest,
+    provider_info: tuple = Depends(get_provider_and_id)
+):
+    provider, _ = provider_info
+    try:
+        success = await provider.delete_item(req.path)
+        if success:
+            return {"message": f"Item '{req.path}' deleted successfully"}
+        raise HTTPException(status_code=500, detail="Failed to delete item")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An error occurred during deletion: {e}")
 
 @app.get("/api/debug/indexed-files")
 async def get_all_indexed_files(req: Request):
