@@ -1,5 +1,7 @@
 # AI 기반 Synology NAS 파일 관리 시스템
 
+https://eventer-map.mydns.jp:7770/
+
 AI를 활용하여 Synology NAS의 파일을 효율적으로 관리하는 시스템입니다.
 
 ## 주요 기능
